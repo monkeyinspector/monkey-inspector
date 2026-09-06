@@ -1,3 +1,7 @@
+import com.vanniktech.maven.publish.JavaLibrary
+import com.vanniktech.maven.publish.JavadocJar
+import com.vanniktech.maven.publish.SourcesJar
+
 plugins {
     `java-library`
     `maven-publish`
@@ -29,6 +33,13 @@ dependencies {
 }
 
 mavenPublishing {
+    configure(
+        JavaLibrary(
+            javadocJar = JavadocJar.None(),
+            sourcesJar = SourcesJar.None()
+        )
+    )
+
     coordinates(
         groupId = "io.github.monkeyinspector",
         artifactId = "monkeyinspector",
