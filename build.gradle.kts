@@ -2,7 +2,7 @@ plugins {
     `java-library`
     `maven-publish`
     signing
-    id("org.jreleaser") version "1.25.0"
+    id("com.vanniktech.maven.publish") version "0.37.0"
 }
 
 group = "io.github.monkeyinspector"
@@ -28,53 +28,44 @@ dependencies {
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
 
-publishing {
-    publications {
-        create<MavenPublication>("mavenJava") {
-            from(components["java"])
-            artifactId = "monkeyinspector"
+mavenPublishing {
+    coordinates(
+        groupId = "io.github.monkeyinspector",
+        artifactId = "monkeyinspector",
+        version = "0.3.0"
+    )
 
-            pom {
-                name.set("Monkey Inspector")
-                description.set(project.description)
-                url.set("https://github.com/yuhan3958/monkey-inspector")
+    pom {
+        name.set("Monkey Inspector")
+        description.set(project.description)
+        inceptionYear.set("2026")
+        url.set("https://github.com/yuhan3958/monkey-inspector")
 
-                licenses {
-                    license {
-                        name.set("The Apache License, Version 2.0")
-                        url.set("https://www.apache.org/licenses/LICENSE-2.0.txt")
-                        distribution.set("repo")
-                    }
-                }
-
-                developers {
-                    developer {
-                        id.set("yuhan3958")
-                        name.set("yuhan8954")
-                        email.set("yuhan8954@gmail.com")
-                    }
-                }
-
-                scm {
-                    connection.set("scm:git:https://github.com/yuhan3958/monkey-inspector.git")
-                    developerConnection.set("scm:git:ssh://git@github.com/yuhan3958/monkey-inspector.git")
-                    url.set("https://github.com/yuhan3958/monkey-inspector")
-                }
+        licenses {
+            license {
+                name.set("The Apache License, Version 2.0")
+                url.set("https://www.apache.org/licenses/LICENSE-2.0.txt")
+                distribution.set("repo")
             }
         }
-    }
 
-    repositories {
-        maven {
-            name = "staging"
-            url = layout.buildDirectory.dir("staging-deploy").get().asFile.toURI()
+        developers {
+            developer {
+                id.set("yuhan3958")
+                name.set("Yuhan Kim")
+                email.set("yuhan8954@gmail.com")
+            }
+        }
+
+        scm {
+            connection.set("scm:git:https://github.com/yuhan3958/monkey-inspector.git")
+            developerConnection.set("scm:git:ssh://git@github.com/yuhan3958/monkey-inspector.git")
+            url.set("https://github.com/yuhan3958/monkey-inspector")
         }
     }
-}
 
-signing {
-    useGpgCmd()
-    sign(publishing.publications["mavenJava"])
+    publishToMavenCentral()
+    signAllPublications()
 }
 
 tasks.jar {
@@ -109,4 +100,8 @@ tasks.withType<Javadoc>().configureEach {
 
 tasks.test {
     useJUnitPlatform()
+}
+
+tasks.named("generateMetadataFileForMavenPublication") {
+    dependsOn(tasks.named("plainJavadocJar"))
 }

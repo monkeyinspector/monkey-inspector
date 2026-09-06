@@ -13,27 +13,32 @@ io.github.monkeyinspector:monkeyinspector:0.3.0
 2. Generate a Central Portal user token.
 3. Import a GPG signing key into the local keyring and publish its public key
    to a public keyserver.
-4. Set these environment variables without committing their values:
+4. Copy `gradle.properties.example` to the ignored `gradle.properties` file
+   and fill in the Central user-token credentials and GPG passphrase:
 
 ```text
-JRELEASER_MAVENCENTRAL_APP_USERNAME
-JRELEASER_MAVENCENTRAL_APP_PASSWORD
+mavenCentralUsername=central-token-username
+mavenCentralPassword=central-token-password
+signing.keyId=D23E465D
+signing.password=gpg-passphrase
+signing.secretKeyRingFile=C:/path/to/secring.gpg
 ```
 
-The Gradle signing plugin uses the local `gpg` command and keyring.
+The same properties may instead be stored in
+`~/.gradle/gradle.properties` so they can be shared by local projects without
+entering this repository.
 
 ## Prepare and verify
 
 On Windows:
 
 ```powershell
-.\gradlew.bat clean test javadoc publishAllPublicationsToStagingRepository
-.\gradlew.bat jreleaserConfig
+.\gradlew.bat clean test javadoc publishToMavenLocal
 ```
 
-Inspect `build/staging-deploy` before upload. It must contain the main JAR,
-sources JAR, Javadoc JAR, POM, Gradle module metadata, and an `.asc` signature
-for every published artifact.
+Inspect the generated publication in the local Maven repository. It must
+contain the main JAR, sources JAR, Javadoc JAR, POM, Gradle module metadata,
+and an `.asc` signature for every published artifact.
 
 ## Publish
 
@@ -42,7 +47,7 @@ Central Publisher Portal. Do not run it until the version, coordinates,
 license, generated POM, signatures, and release notes have been reviewed.
 
 ```powershell
-.\gradlew.bat jreleaserDeploy
+.\gradlew.bat publishToMavenCentral
 ```
 
 Maven Central releases are immutable. After the deployment reaches
