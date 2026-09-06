@@ -7,55 +7,301 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicReference;
 
-final class InspectorHttpServer implements AutoCloseable {
+final class InspectorHttpServer
+        implements AutoCloseable {
+
+    interface Commands {
+        void clearTrace();
+        void clearEngineProfile();
+        void refreshSnapshot();
+    }
+
     private final HttpServer server;
-    private final AtomicReference<String> snapshot;
+    private final ExecutorService executor;
+
+    private final AtomicReference<String>
+            snapshot;
+
+    private final Commands commands;
+
     private final byte[] indexHtml;
 
-    InspectorHttpServer(String host, int port, AtomicReference<String> snapshot) throws IOException {
+    InspectorHttpServer(
+            String host,
+            int port,
+            AtomicReference<String> snapshot,
+            Commands commands
+    ) throws IOException {
+
         this.snapshot = snapshot;
-        this.indexHtml = loadResource("/inspector/index.html");
-        server = HttpServer.create(new InetSocketAddress(host, port), 0);
-        server.createContext("/", this::handleIndex);
-        server.createContext("/api/snapshot", this::handleSnapshot);
-        server.setExecutor(Executors.newCachedThreadPool(r -> {
-            Thread t = new Thread(r, "monkey-inspector-http");
-            t.setDaemon(true);
-            return t;
-        }));
+        this.commands = commands;
+
+        this.indexHtml =
+                loadResource(
+                        "/inspector/index.html"
+                );
+
+        server =
+                HttpServer.create(
+                        new InetSocketAddress(
+                                host,
+                                port
+                        ),
+                        0
+                );
+
+        server.createContext(
+                "/api/snapshot",
+                this::handleSnapshot
+        );
+
+        server.createContext(
+                "/api/trace/clear",
+                exchange ->
+                        handleCommand(
+                                exchange,
+                                commands::clearTrace
+                        )
+        );
+
+        server.createContext(
+                "/api/engine-profile/clear",
+                exchange ->
+                        handleCommand(
+                                exchange,
+                                commands::clearEngineProfile
+                        )
+        );
+
+        server.createContext(
+                "/api/snapshot/refresh",
+                exchange ->
+                        handleCommand(
+                                exchange,
+                                commands::refreshSnapshot
+                        )
+        );
+
+        server.createContext(
+                "/",
+                this::handleIndex
+        );
+
+        executor =
+                Executors.newCachedThreadPool(
+                        runnable -> {
+                            Thread thread =
+                                    new Thread(
+                                            runnable,
+                                            "monkey-inspector-http"
+                                    );
+
+                            thread.setDaemon(true);
+
+                            return thread;
+                        }
+                );
+
+        server.setExecutor(executor);
     }
 
-    void start() { server.start(); }
-
-    private void handleIndex(HttpExchange ex) throws IOException {
-        if (!"GET".equalsIgnoreCase(ex.getRequestMethod())) { send(ex, 405, "text/plain", "Method Not Allowed".getBytes(StandardCharsets.UTF_8)); return; }
-        send(ex, 200, "text/html; charset=utf-8", indexHtml);
+    void start() {
+        server.start();
     }
 
-    private void handleSnapshot(HttpExchange ex) throws IOException {
-        if (!"GET".equalsIgnoreCase(ex.getRequestMethod())) { send(ex, 405, "text/plain", "Method Not Allowed".getBytes(StandardCharsets.UTF_8)); return; }
-        byte[] body = snapshot.get().getBytes(StandardCharsets.UTF_8);
-        ex.getResponseHeaders().set("Cache-Control", "no-store");
-        send(ex, 200, "application/json; charset=utf-8", body);
+    private void handleIndex(
+            HttpExchange exchange
+    ) throws IOException {
+
+        if (
+                !"GET".equalsIgnoreCase(
+                        exchange.getRequestMethod()
+                )
+        ) {
+            sendText(
+                    exchange,
+                    405,
+                    "Method Not Allowed"
+            );
+            return;
+        }
+
+        if (
+                !"/".equals(
+                        exchange
+                                .getRequestURI()
+                                .getPath()
+                )
+        ) {
+            sendText(
+                    exchange,
+                    404,
+                    "Not Found"
+            );
+            return;
+        }
+
+        send(
+                exchange,
+                200,
+                "text/html; charset=utf-8",
+                indexHtml
+        );
     }
 
-    private static void send(HttpExchange ex, int status, String contentType, byte[] body) throws IOException {
-        ex.getResponseHeaders().set("Content-Type", contentType);
-        ex.getResponseHeaders().set("X-Content-Type-Options", "nosniff");
-        ex.sendResponseHeaders(status, body.length);
-        ex.getResponseBody().write(body);
-        ex.close();
+    private void handleSnapshot(
+            HttpExchange exchange
+    ) throws IOException {
+
+        if (
+                !"GET".equalsIgnoreCase(
+                        exchange.getRequestMethod()
+                )
+        ) {
+            sendText(
+                    exchange,
+                    405,
+                    "Method Not Allowed"
+            );
+            return;
+        }
+
+        exchange
+                .getResponseHeaders()
+                .set(
+                        "Cache-Control",
+                        "no-store, max-age=0"
+                );
+
+        send(
+                exchange,
+                200,
+                "application/json; charset=utf-8",
+                snapshot
+                        .get()
+                        .getBytes(
+                                StandardCharsets.UTF_8
+                        )
+        );
     }
 
-    private static byte[] loadResource(String name) throws IOException {
-        try (InputStream in = InspectorHttpServer.class.getResourceAsStream(name)) {
-            if (in == null) throw new IOException("Missing resource " + name);
-            return in.readAllBytes();
+    private void handleCommand(
+            HttpExchange exchange,
+            Runnable command
+    ) throws IOException {
+
+        if (
+                !"POST".equalsIgnoreCase(
+                        exchange.getRequestMethod()
+                )
+        ) {
+            sendText(
+                    exchange,
+                    405,
+                    "Method Not Allowed"
+            );
+            return;
+        }
+
+        command.run();
+
+        send(
+                exchange,
+                202,
+                "application/json; charset=utf-8",
+                "{\"accepted\":true}"
+                        .getBytes(
+                                StandardCharsets.UTF_8
+                        )
+        );
+    }
+
+    private static void sendText(
+            HttpExchange exchange,
+            int status,
+            String text
+    ) throws IOException {
+
+        send(
+                exchange,
+                status,
+                "text/plain; charset=utf-8",
+                text.getBytes(
+                        StandardCharsets.UTF_8
+                )
+        );
+    }
+
+    private static void send(
+            HttpExchange exchange,
+            int status,
+            String contentType,
+            byte[] body
+    ) throws IOException {
+
+        exchange
+                .getResponseHeaders()
+                .set(
+                        "Content-Type",
+                        contentType
+                );
+
+        exchange
+                .getResponseHeaders()
+                .set(
+                        "X-Content-Type-Options",
+                        "nosniff"
+                );
+
+        exchange
+                .getResponseHeaders()
+                .set(
+                        "Referrer-Policy",
+                        "no-referrer"
+                );
+
+        exchange.sendResponseHeaders(
+                status,
+                body.length
+        );
+
+        try (
+                var output =
+                        exchange.getResponseBody()
+        ) {
+            output.write(body);
+        } finally {
+            exchange.close();
         }
     }
 
-    @Override public void close() { server.stop(0); }
+    private static byte[] loadResource(
+            String path
+    ) throws IOException {
+
+        try (
+                InputStream input =
+                        InspectorHttpServer.class
+                                .getResourceAsStream(path)
+        ) {
+            if (input == null) {
+                throw new IOException(
+                        "Missing resource "
+                                + path
+                );
+            }
+
+            return input.readAllBytes();
+        }
+    }
+
+    @Override
+    public void close() {
+        server.stop(0);
+        executor.shutdownNow();
+    }
 }
