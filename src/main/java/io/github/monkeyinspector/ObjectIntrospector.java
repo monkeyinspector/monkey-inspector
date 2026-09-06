@@ -157,9 +157,7 @@ final class ObjectIntrospector {
         }
 
         if (value instanceof Optional<?> optional) {
-            return optional.isPresent()
-                    ? "Optional[" + preview(optional.get()) + "]"
-                    : "Optional.empty";
+            return optional.map(o -> "Optional[" + preview(o) + "]").orElse("Optional.empty");
         }
 
         if (type.getName().startsWith("com.jme3.math.")) {

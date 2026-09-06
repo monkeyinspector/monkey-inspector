@@ -65,7 +65,7 @@ final class SnapshotBuilder {
         j.objectStart();
 
         j.name("version")
-                .value("0.2.0");
+                .value(InspectorState.VERSION);
 
         j.name("timestampMillis")
                 .value(

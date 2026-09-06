@@ -1,0 +1,25 @@
+project:
+  name: monkey-inspector
+  version: 0.3.0
+  description: A lightweight runtime inspector for jMonkeyEngine applications
+  authors:
+    - yuhan8954
+  license: Apache-2.0
+  links:
+    homepage: https://github.com/yuhan3958/monkey-inspector
+  java:
+    groupId: io.github.monkeyinspector
+    artifactId: monkeyinspector
+
+release:
+  github:
+    enabled: false
+
+deploy:
+  maven:
+    mavenCentral:
+      app:
+        active: RELEASE
+        url: https://central.sonatype.com/api/v1/publisher
+        stagingRepositories:
+          - build/staging-deploy

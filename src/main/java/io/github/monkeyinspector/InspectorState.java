@@ -5,12 +5,23 @@ import com.jme3.app.state.BaseAppState;
 import com.jme3.profile.AppProfiler;
 
 import java.io.IOException;
+import java.util.Objects;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicReference;
 
+/**
+ * jMonkeyEngine app state that exposes a live runtime inspector over HTTP.
+ * Attach one instance to an application's state manager, then open
+ * {@link #getInspectorUrl()} in a browser.
+ */
 public final class InspectorState
         extends BaseAppState {
 
+    /** Current Monkey Inspector release. */
+    public static final String VERSION =
+            "0.3.0";
+
+    /** Default HTTP port. */
     public static final int DEFAULT_PORT =
             7331;
 
@@ -41,18 +52,39 @@ public final class InspectorState
 
     private volatile boolean forceSnapshot;
 
+    /**
+     * Creates an inspector with {@link InspectorConfig#defaults()}.
+     */
     public InspectorState() {
         this(
                 InspectorConfig.defaults()
         );
     }
 
+    /**
+     * Creates an inspector with the supplied configuration.
+     *
+     * @param config inspector configuration
+     * @throws NullPointerException if {@code config} is {@code null}
+     */
     public InspectorState(
             InspectorConfig config
     ) {
-        this.config = config;
+        this.config = Objects.requireNonNull(
+                config,
+                "config"
+        );
     }
 
+    /**
+     * Creates an inspector using the common configuration options.
+     * Engine profiling is enabled and at most 48 fields are shown per object.
+     *
+     * @param host HTTP bind address
+     * @param port HTTP port
+     * @param snapshotIntervalSeconds positive snapshot interval in seconds
+     * @param maxSceneNodes positive maximum scene-node count
+     */
     public InspectorState(
             String host,
             int port,
@@ -71,10 +103,22 @@ public final class InspectorState
         );
     }
 
+    /**
+     * Returns this inspector's immutable configuration.
+     *
+     * @return inspector configuration
+     */
     public InspectorConfig getConfig() {
         return config;
     }
 
+    /**
+     * Adds an object to the watched-object section using its simple class name.
+     * Repeated calls for the same object identity are ignored.
+     *
+     * @param object object to watch; {@code null} is ignored
+     * @return this state for chaining
+     */
     public InspectorState watch(
             Object object
     ) {
@@ -89,6 +133,14 @@ public final class InspectorState
         );
     }
 
+    /**
+     * Adds a named object to the watched-object section.
+     * Repeated calls for the same object identity are ignored.
+     *
+     * @param name display name; a blank value uses the simple class name
+     * @param object object to watch; {@code null} is ignored
+     * @return this state for chaining
+     */
     public InspectorState watch(
             String name,
             Object object
@@ -119,6 +171,11 @@ public final class InspectorState
         return this;
     }
 
+    /**
+     * Removes an object from the watched-object section by identity.
+     *
+     * @param object object to remove; {@code null} is ignored
+     */
     public void unwatch(
             Object object
     ) {
@@ -132,14 +189,31 @@ public final class InspectorState
         );
     }
 
+    /**
+     * Returns the browser URL for this inspector.
+     *
+     * @return inspector URL
+     */
     public String getInspectorUrl() {
+        String host =
+                config.host();
+
+        if (host.contains(":")
+                && !host.startsWith("[")) {
+            host = "[" + host + "]";
+        }
+
         return "http://"
-                + config.host()
+                + host
                 + ":"
                 + config.port()
                 + "/";
     }
 
+    /**
+     * Requests a fresh snapshot on the application thread.
+     * The request is ignored before initialization and after cleanup.
+     */
     public void refreshNow() {
         Application app =
                 application;
@@ -233,7 +307,9 @@ public final class InspectorState
             server.start();
 
             System.out.println(
-                    "[MonkeyInspector 0.2] "
+                    "[MonkeyInspector "
+                            + VERSION
+                            + "] "
                             + getInspectorUrl()
             );
 

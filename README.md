@@ -1,73 +1,119 @@
-# Monkey Inspector 0.1
+# Monkey Inspector
 
-A tiny runtime inspector for **jMonkeyEngine**. It runs inside the game and serves a local browser UI.
+Monkey Inspector is a lightweight runtime inspector for
+[jMonkeyEngine](https://jmonkeyengine.org/) applications. It runs inside the
+game and serves a local browser UI without a separate agent or web framework.
 
-## What works in this MVP
+## Features
 
-- Live Scene Graph (`rootNode` + `guiNode`)
-- `Spatial` transforms, culling/render info, triangle/vertex counts
-- Attached `Control`s
-- Runtime Java class inheritance + implemented interfaces
-- AppState discovery (best-effort reflection over `AppStateManager`)
-- Arbitrary watched subsystem/service objects
-- Explicit runtime workflow tracing with call counts and elapsed time
-- Local-only server by default (`127.0.0.1:7331`)
-- No Ktor/Netty/Jackson dependency; only jME is needed
+- Live Scene Graph for `rootNode` and `guiNode`
+- Spatial transforms, culling and render information, and mesh statistics
+- Attached `Control` instances and live reflected fields
+- AppState discovery and arbitrary watched objects
+- Runtime class, inheritance, interface, and field-dependency graphs
+- Explicit workflow tracing with call counts and timings
+- jMonkeyEngine frame and pipeline profiling
+- Local-only HTTP server by default
+- No runtime dependency beyond jMonkeyEngine
 
-## Add it to a game
+## Requirements
 
-Build/publish the library, or include this project as a Gradle composite/module. Then:
+- Java 17 or newer
+- jMonkeyEngine 3.9
+
+## Installation
+
+Gradle Kotlin DSL:
 
 ```kotlin
-import io.github.monkeyinspector.InspectorState
+dependencies {
+    implementation("io.github.monkeyinspector:monkeyinspector:0.3.0")
+}
+```
 
-class Game : SimpleApplication() {
-    override fun simpleInitApp() {
-        val inspector = InspectorState()
-            .watch(myNpcManager)
-            .watch(myWorldManager)
+Maven:
 
-        stateManager.attach(inspector)
-        // Open http://127.0.0.1:7331/
+```xml
+<dependency>
+    <groupId>io.github.monkeyinspector</groupId>
+    <artifactId>monkeyinspector</artifactId>
+    <version>0.3.0</version>
+</dependency>
+```
+
+## Usage
+
+Attach `InspectorState` during application initialization:
+
+```java
+import com.jme3.app.SimpleApplication;
+import io.github.monkeyinspector.InspectorState;
+
+public final class Game extends SimpleApplication {
+    @Override
+    public void simpleInitApp() {
+        InspectorState inspector = new InspectorState()
+                .watch("NPC manager", npcManager)
+                .watch(worldManager);
+
+        stateManager.attach(inspector);
+        System.out.println(inspector.getInspectorUrl());
     }
 }
 ```
 
-If you paste the source directly into the game project, the same code works without publishing a jar.
+Open `http://127.0.0.1:7331/` while the game is running.
 
-## Runtime workflow trace
+The default server only listens on the loopback interface. If you bind it to
+another address, protect access at the network boundary because the inspector
+exposes runtime state.
 
-Java:
+## Configuration
+
+`InspectorConfig` is immutable and provides copy methods for common options:
+
+```java
+InspectorConfig config = InspectorConfig.defaults()
+        .withPort(8080)
+        .withSnapshotInterval(0.5f)
+        .withMaxSceneNodes(10_000)
+        .withMaxFieldsPerObject(32)
+        .withEngineProfiling(true);
+
+stateManager.attach(new InspectorState(config));
+```
+
+## Workflow tracing
+
+Wrap code with `InspectorTrace` to populate the Workflow graph:
 
 ```java
 InspectorTrace.runSpan("NPCState.update", () -> {
     InspectorTrace.runSpan("NpcManager.update", npcManager::update);
 });
+
+Path path = InspectorTrace.callSpan(
+        "Pathfinder.findPath",
+        () -> pathfinder.findPath(from, to)
+);
 ```
 
-Kotlin:
+For manual spans, use try-with-resources:
 
-```kotlin
-InspectorTrace.runSpan("NPCState.update") {
-    InspectorTrace.runSpan("NpcManager.update") {
-        npcManager.update()
-    }
+```java
+try (InspectorTrace.Span span = InspectorTrace.begin("load-world")) {
+    loadWorld();
 }
 ```
 
-For return values:
+`runSpan` and `callSpan` automatically record unchecked failures. A manual
+span can be marked with `span.failed()` before it is closed.
 
-```kotlin
-val path = InspectorTrace.callSpan("Pathfinder.findPath") {
-    pathfinder.findPath(from, to)
-}
-```
+## How it works
 
-The browser turns parent/child spans into a live workflow graph.
-
-## Design
-
-The jME render thread snapshots the scene every 250 ms into immutable JSON. The HTTP thread only serves that JSON, so it never walks the Scene Graph concurrently.
+The jMonkeyEngine update thread snapshots runtime state into immutable JSON.
+The HTTP thread only serves the latest JSON value, so it never traverses the
+Scene Graph concurrently.
 
 ```text
 jME update thread                 browser
@@ -77,15 +123,6 @@ jME update thread                 browser
 AtomicReference<String> -----> local HTTP server
 ```
 
-## Next milestones
+## License
 
-1. HTTP commands: pause, select, trace-clear, enable/disable AppState.
-2. Property editing: transforms and safe primitive fields.
-3. Scene diff protocol instead of full snapshots.
-4. Search/filter and object pinning.
-5. Java Agent + Byte Buddy for automatic method-call instrumentation.
-6. IntelliJ tool window that embeds the same UI and attaches to a running JVM.
-
-## Compatibility
-
-The build file targets jMonkeyEngine `3.9.0-stable` and Java 17. The inspector code intentionally sticks to long-lived Scene Graph APIs, so adapting it to nearby jME 3.x versions should be small.
+Licensed under the [Apache License 2.0](LICENSE).

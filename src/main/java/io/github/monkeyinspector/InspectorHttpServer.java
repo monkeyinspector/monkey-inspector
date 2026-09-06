@@ -264,6 +264,24 @@ final class InspectorHttpServer
                         "no-referrer"
                 );
 
+        exchange
+                .getResponseHeaders()
+                .set(
+                        "Content-Security-Policy",
+                        "default-src 'none'; "
+                                + "style-src 'unsafe-inline'; "
+                                + "script-src 'unsafe-inline'; "
+                                + "connect-src 'self'; "
+                                + "img-src 'self' data:"
+                );
+
+        exchange
+                .getResponseHeaders()
+                .set(
+                        "X-Frame-Options",
+                        "DENY"
+                );
+
         exchange.sendResponseHeaders(
                 status,
                 body.length

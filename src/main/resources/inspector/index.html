@@ -5,7 +5,7 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width,initial-scale=1">
-    <title>Monkey Inspector 0.2</title>
+    <title>Monkey Inspector 0.3.0</title>
 
     <style>
         :root{
@@ -350,7 +350,7 @@
 <body>
 
 <header>
-    <strong>🐒 Monkey Inspector <span class="small">0.2</span></strong>
+    <strong>🐒 Monkey Inspector <span class="small">0.3.0</span></strong>
     <input id="search" placeholder="Search scene / class / object…">
     <button id="refresh">Refresh</button>
     <span id="status">connecting…</span>
@@ -431,7 +431,15 @@
 
             <div id="engineMetrics" class="metrics"></div>
 
-            <svg id="engineGraph" class="graph"></svg>
+            <div class="graphFrame">
+                <div class="graphToolbar" aria-label="Engine graph zoom">
+                    <button type="button" data-zoom-target="engineGraph" data-zoom="in" title="Zoom in">+</button>
+                    <button type="button" data-zoom-target="engineGraph" data-zoom="out" title="Zoom out">−</button>
+                    <button type="button" data-zoom-target="engineGraph" data-zoom="reset" title="Reset zoom">Reset</button>
+                    <span id="engineGraphZoom" class="zoomValue">100%</span>
+                </div>
+                <svg id="engineGraph" class="graph"></svg>
+            </div>
             <div id="engineTable"></div>
         </div>
 
@@ -442,6 +450,10 @@
 <script>
     let latest = null
     let selectedId = null
+    let tickInFlight = false
+
+    const collapsedSceneIds = new Set()
+    const searchCollapsedSceneIds = new Set()
 
     const $ = id => document.getElementById(id)
 
@@ -527,6 +539,8 @@
                     : ""
             )
 
+        div.dataset.objectId = object.id
+
         div.innerHTML =
             `<span class="kind">${esc(kind)}</span>`
             + `<span class="name">${esc(label)}</span>`
@@ -534,7 +548,18 @@
 
         div.onclick = () => {
             selectedId = object.id
-            renderAll()
+
+            document
+                .querySelectorAll(".row")
+                .forEach(
+                    row =>
+                        row.classList.toggle(
+                            "selected",
+                            row.dataset.objectId === selectedId
+                        )
+                )
+
+            renderDetails()
         }
 
         return div
@@ -551,6 +576,26 @@
             (node.children || [])
                 .filter(subtreeMatches)
 
+        const controls =
+            (node.controls || [])
+                .filter(
+                    control =>
+                        !query()
+                        || matches(control)
+                )
+
+        const hasDescendants =
+            controls.length > 0
+            || children.length > 0
+
+        const collapseState =
+            query()
+                ? searchCollapsedSceneIds
+                : collapsedSceneIds
+
+        const collapsed =
+            collapseState.has(node.id)
+
         const row =
             rowFor(
                 node,
@@ -563,40 +608,41 @@
 
         twisty.className = "twisty"
         twisty.textContent =
-            children.length
-                ? "▾"
+            hasDescendants
+                ? collapsed
+                    ? "▸"
+                    : "▾"
                 : ""
 
         row.prepend(twisty)
         li.appendChild(row)
 
-        for (const control of node.controls || []) {
-            if (
-                query()
-                && !matches(control)
-            ) continue
-
-            const wrap =
-                document.createElement("div")
-
-            wrap.style.paddingLeft =
-                "28px"
-
-            wrap.appendChild(
-                rowFor(
-                    control,
-                    control.name
-                    || short(control.classInfo?.name),
-                    "Control"
-                )
-            )
-
-            li.appendChild(wrap)
-        }
-
-        if (children.length) {
+        if (hasDescendants) {
             const ul =
                 document.createElement("ul")
+
+            ul.hidden = collapsed
+
+            for (const control of controls) {
+                const item =
+                    document.createElement("li")
+
+                const controlRow =
+                    rowFor(
+                        control,
+                        control.name
+                        || short(control.classInfo?.name),
+                        "Control"
+                    )
+
+                const spacer =
+                    document.createElement("span")
+
+                spacer.className = "twisty"
+                controlRow.prepend(spacer)
+                item.appendChild(controlRow)
+                ul.appendChild(item)
+            }
 
             for (const child of children) {
                 const item =
@@ -612,12 +658,14 @@
                 event.stopPropagation()
 
                 const hidden =
-                    ul.style.display === "none"
+                    ul.hidden
 
-                ul.style.display =
-                    hidden
-                        ? ""
-                        : "none"
+                ul.hidden = !hidden
+
+                if (hidden)
+                    collapseState.delete(node.id)
+                else
+                    collapseState.add(node.id)
 
                 twisty.textContent =
                     hidden
@@ -1700,6 +1748,8 @@
         if (!nodes.length) {
             setGraphBounds(svg,600,120)
 
+            $("architectureTable").innerHTML = ""
+
             svg.innerHTML +=
                 `<text x="18" y="42"`
                 + ` class="nodeText"`
@@ -1886,6 +1936,11 @@
     }
 
     async function tick() {
+        if (tickInFlight)
+            return
+
+        tickInFlight = true
+
         try {
             const response =
                 await fetch(
@@ -1902,13 +1957,18 @@
         } catch (_) {
             $("status").textContent =
                 "disconnected"
+        } finally {
+            tickInFlight = false
         }
     }
 
     $("search")
         .addEventListener(
             "input",
-            renderAll
+            () => {
+                searchCollapsedSceneIds.clear()
+                renderAll()
+            }
         )
 
     $("refresh").onclick =

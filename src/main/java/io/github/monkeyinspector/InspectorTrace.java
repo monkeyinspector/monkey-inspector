@@ -6,12 +6,17 @@ import java.util.Comparator;
 import java.util.Deque;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.LongAccumulator;
 import java.util.concurrent.atomic.LongAdder;
 import java.util.function.Supplier;
 
+/**
+ * Lightweight explicit tracing API used by the inspector workflow view.
+ * Traces are aggregated globally and can be recorded from multiple threads.
+ */
 public final class InspectorTrace {
 
     private InspectorTrace() {}
@@ -40,6 +45,13 @@ public final class InspectorTrace {
                     System.currentTimeMillis()
             );
 
+    /**
+     * Starts a trace span. Close the returned span, preferably with
+     * try-with-resources.
+     *
+     * @param name non-blank span name
+     * @return the open span
+     */
     public static Span begin(
             String name
     ) {
@@ -72,10 +84,21 @@ public final class InspectorTrace {
         return new Span(frame);
     }
 
+    /**
+     * Runs an action in a trace span and records unchecked failures.
+     *
+     * @param name non-blank span name
+     * @param runnable action to run
+     */
     public static void runSpan(
             String name,
             Runnable runnable
     ) {
+        Objects.requireNonNull(
+                runnable,
+                "runnable"
+        );
+
         Span span =
                 begin(name);
 
@@ -92,10 +115,23 @@ public final class InspectorTrace {
         }
     }
 
+    /**
+     * Calls a supplier in a trace span and records unchecked failures.
+     *
+     * @param name non-blank span name
+     * @param supplier value supplier
+     * @param <T> supplied value type
+     * @return the supplied value
+     */
     public static <T> T callSpan(
             String name,
             Supplier<T> supplier
     ) {
+        Objects.requireNonNull(
+                supplier,
+                "supplier"
+        );
+
         Span span =
                 begin(name);
 
@@ -112,6 +148,7 @@ public final class InspectorTrace {
         }
     }
 
+    /** Clears all accumulated trace statistics. */
     public static void clear() {
         NODES.clear();
         EDGES.clear();
@@ -248,6 +285,7 @@ public final class InspectorTrace {
         j.objectEnd();
     }
 
+    /** A closeable trace span returned by {@link #begin(String)}. */
     public static final class Span
             implements AutoCloseable {
 
@@ -260,11 +298,17 @@ public final class InspectorTrace {
             this.frame = frame;
         }
 
+        /**
+         * Marks this span as failed.
+         *
+         * @return this span
+         */
         public Span failed() {
             failed = true;
             return this;
         }
 
+        /** Finishes the span. Repeated calls have no effect. */
         @Override
         public void close() {
             Frame current =
