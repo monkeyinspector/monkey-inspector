@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Monkey Inspector</title>
+<style>
+:root { color-scheme: dark; font-family: Inter, ui-sans-serif, system-ui, sans-serif; }
+* { box-sizing: border-box; }
+body { margin:0; background:#111318; color:#e7eaf0; overflow:hidden; }
+header { height:44px; display:flex; align-items:center; gap:12px; padding:0 14px; border-bottom:1px solid #2a2f39; background:#171a20; }
+header strong { letter-spacing:.2px; }
+#status { font-size:12px; opacity:.7; }
+main { height:calc(100vh - 44px); display:grid; grid-template-columns: 34% 33% 33%; }
+.panel { min-width:0; overflow:auto; border-right:1px solid #2a2f39; }
+.panel:last-child { border-right:none; }
+.panel h2 { position:sticky; top:0; z-index:2; margin:0; padding:10px 12px; font-size:12px; text-transform:uppercase; letter-spacing:.12em; background:#171a20; border-bottom:1px solid #2a2f39; }
+.section { padding:8px 10px 16px; }
+ul.tree, ul.tree ul { list-style:none; margin:0; padding-left:16px; }
+ul.tree { padding-left:0; }
+.row { display:flex; align-items:center; gap:6px; min-height:25px; padding:2px 5px; border-radius:5px; cursor:pointer; white-space:nowrap; }
+.row:hover { background:#222832; }
+.row.selected { background:#2a3442; }
+.twisty { width:12px; opacity:.7; }
+.kind { font-size:10px; padding:1px 4px; border:1px solid #394250; border-radius:4px; opacity:.75; }
+.name { overflow:hidden; text-overflow:ellipsis; }
+.muted { opacity:.58; }
+.card { border:1px solid #303643; background:#171b22; border-radius:7px; padding:9px; margin:7px 0; }
+.kv { display:grid; grid-template-columns:110px 1fr; gap:5px 9px; font-size:12px; }
+.kv b { opacity:.6; font-weight:500; }
+.chain { display:flex; flex-direction:column; gap:3px; font:12px ui-monospace, SFMono-Regular, Menlo, monospace; }
+.chain div::before { content:'↳ '; opacity:.4; }
+.controls { margin-top:8px; font-size:12px; }
+button { background:#242b36; color:#e7eaf0; border:1px solid #3a4351; border-radius:5px; padding:5px 8px; cursor:pointer; }
+button:hover { background:#2d3643; }
+#workflow { width:100%; min-height:320px; }
+.edgeLabel { font:11px ui-monospace, monospace; fill:#aeb7c4; }
+.nodeBox { fill:#1d232c; stroke:#455164; rx:6; ry:6; }
+.nodeText { font:11px ui-monospace, monospace; fill:#edf1f7; }
+.edgeLine { stroke:#66758b; stroke-width:1.2; marker-end:url(#arrow); }
+.empty { padding:14px; opacity:.55; font-size:12px; }
+</style>
+</head>
+<body>
+<header><strong>🐒 Monkey Inspector</strong><span id="status">connecting…</span><button id="clearTrace">Clear trace</button></header>
+<main>
+<section class="panel"><h2>Scene Graph</h2><div id="scene" class="section"></div><h2>App States</h2><div id="states" class="section"></div></section>
+<section class="panel"><h2>Selection / Class Hierarchy</h2><div id="details" class="section"><div class="empty">Select a scene object, Control, AppState, or watched object.</div></div><h2>Watched Objects</h2><div id="watched" class="section"></div></section>
+<section class="panel"><h2>Runtime Workflow</h2><div class="section"><svg id="workflow"></svg><div id="traceTable"></div></div></section>
+</main>
+<script>
+let latest=null, selectedId=null;
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+function short(n){ return (n||'').split('.').pop(); }
+function rowFor(obj, label, kind){
+  const div=document.createElement('div'); div.className='row'+(selectedId===obj.id?' selected':''); div.dataset.id=obj.id;
+  div.innerHTML=`<span class="kind">${esc(kind)}</span><span class="name">${esc(label)}</span><span class="muted">${esc(short(obj.classInfo?.name))}</span>`;
+  div.onclick=()=>{selectedId=obj.id; renderAll();}; return div;
+}
+function spatialLi(node){
+  const li=document.createElement('li'); const has=node.children?.length;
+  const row=rowFor(node,node.name,node.kind); const t=document.createElement('span'); t.className='twisty'; t.textContent=has?'▾':''; row.prepend(t); li.appendChild(row);
+  if(node.controls?.length){ for(const c of node.controls){ const wrap=document.createElement('div'); wrap.style.paddingLeft='28px'; wrap.appendChild(rowFor(c, short(c.classInfo.name),'Control')); li.appendChild(wrap); } }
+  if(has){ const ul=document.createElement('ul'); for(const ch of node.children) ul.appendChild(spatialLi(ch)); li.appendChild(ul); t.onclick=e=>{e.stopPropagation(); const hidden=ul.style.display==='none'; ul.style.display=hidden?'':'none'; t.textContent=hidden?'▾':'▸';}; }
+  return li;
+}
+function renderScene(){ const root=document.getElementById('scene'); root.innerHTML=''; const ul=document.createElement('ul'); ul.className='tree'; for(const n of latest.sceneRoots||[]) ul.appendChild(spatialLi(n)); root.appendChild(ul); }
+function renderObjects(targetId, objects, kind){ const root=document.getElementById(targetId); root.innerHTML=''; if(!objects?.length){root.innerHTML='<div class="empty">None</div>'; return;} for(const o of objects) root.appendChild(rowFor(o,short(o.classInfo.name),kind)); }
+function walkSpatial(n, fn){ if(fn(n))return n; for(const c of n.controls||[]) if(fn(c))return c; for(const ch of n.children||[]){const r=walkSpatial(ch,fn);if(r)return r;} return null; }
+function findSelected(){ if(!selectedId)return null; for(const n of latest.sceneRoots||[]){const r=walkSpatial(n,o=>o.id===selectedId);if(r)return r;} for(const o of [...(latest.appStates||[]),...(latest.watchedObjects||[])])if(o.id===selectedId)return o; return null; }
+function renderDetails(){ const root=document.getElementById('details'), o=findSelected(); if(!o){root.innerHTML='<div class="empty">Select something.</div>';return;} const ci=o.classInfo||{}; let props=''; for(const k of ['name','kind','localTranslation','worldTranslation','localRotation','localScale','cullHint','queueBucket','triangles','vertices','enabled','toString']) if(o[k]!==undefined) props+=`<b>${esc(k)}</b><span>${esc(o[k])}</span>`; root.innerHTML=`<div class="card"><div class="kv">${props}</div></div><div class="card"><div class="chain">${(ci.hierarchy||[]).map(x=>`<div>${esc(x)}</div>`).join('')}</div>${ci.interfaces?.length?`<div class="controls"><b>interfaces</b><br>${ci.interfaces.map(esc).join('<br>')}</div>`:''}</div>`; }
+function renderWorkflow(){ const svg=document.getElementById('workflow'), edges=latest.trace?.edges||[], nodes=latest.trace?.nodes||[]; svg.innerHTML='<defs><marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="#66758b"/></marker></defs>'; if(!nodes.length){svg.setAttribute('height','100'); svg.innerHTML+='<text x="10" y="35" class="nodeText" opacity=".55">No trace data. Wrap code with InspectorTrace.runSpan(...).</text>'; document.getElementById('traceTable').innerHTML=''; return;}
+ const names=[...new Set(nodes.map(n=>n.name))], incoming=new Map(names.map(n=>[n,0])); edges.forEach(e=>incoming.set(e.to,(incoming.get(e.to)||0)+1)); const depth=new Map(); const q=names.filter(n=>(incoming.get(n)||0)===0); q.forEach(n=>depth.set(n,0)); while(q.length){const a=q.shift(),d=depth.get(a)||0; for(const e of edges.filter(e=>e.from===a)){ if(!depth.has(e.to)){depth.set(e.to,Math.min(d+1,6));q.push(e.to);} }} names.forEach(n=>{if(!depth.has(n))depth.set(n,0)}); const groups={}; names.forEach(n=>(groups[depth.get(n)]??=[]).push(n)); const pos=new Map(), colW=190,rowH=62; let maxRows=1; Object.entries(groups).forEach(([d,arr])=>{maxRows=Math.max(maxRows,arr.length);arr.forEach((n,i)=>pos.set(n,{x:20+Number(d)*colW,y:20+i*rowH}))}); const width=Math.max(420,(Math.max(...[...depth.values()])+1)*colW+30),height=Math.max(240,maxRows*rowH+30); svg.setAttribute('viewBox',`0 0 ${width} ${height}`); svg.setAttribute('height',height);
+ for(const e of edges){const a=pos.get(e.from),b=pos.get(e.to);if(!a||!b)continue; const x1=a.x+145,y1=a.y+17,x2=b.x,y2=b.y+17; svg.innerHTML+=`<line class="edgeLine" x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}"/><text class="edgeLabel" x="${(x1+x2)/2}" y="${(y1+y2)/2-4}">${e.calls}×</text>`;}
+ for(const n of names){const p=pos.get(n),st=nodes.find(x=>x.name===n),avg=st.calls?st.totalNanos/st.calls/1000:0; svg.innerHTML+=`<rect class="nodeBox" x="${p.x}" y="${p.y}" width="145" height="34"/><text class="nodeText" x="${p.x+7}" y="${p.y+14}">${esc(short(n)).slice(0,21)}</text><text class="edgeLabel" x="${p.x+7}" y="${p.y+28}">${st.calls}× · ${avg.toFixed(1)} µs</text>`;}
+ document.getElementById('traceTable').innerHTML=edges.length?`<div class="card kv">${edges.slice().sort((a,b)=>b.calls-a.calls).slice(0,20).map(e=>`<b>${esc(short(e.from))} → ${esc(short(e.to))}</b><span>${e.calls} calls</span>`).join('')}</div>`:'';
+}
+function renderAll(){ if(!latest)return; renderScene(); renderObjects('states',latest.appStates,'AppState'); renderObjects('watched',latest.watchedObjects,'Object'); renderDetails(); renderWorkflow(); document.getElementById('status').textContent=`live · ${new Date(latest.timestampMillis).toLocaleTimeString()}${latest.truncated?' · scene truncated':''}`; }
+async function tick(){ try{ const r=await fetch('/api/snapshot',{cache:'no-store'}); latest=await r.json(); renderAll(); }catch(e){document.getElementById('status').textContent='disconnected';} }
+document.getElementById('clearTrace').onclick=()=>alert('MVP 0.1: clear from game code with InspectorTrace.clear(). HTTP command endpoint comes next.');
+setInterval(tick,250); tick();
+</script>
+</body>
+</html>
