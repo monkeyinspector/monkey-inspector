@@ -50,7 +50,7 @@ mavenPublishing {
         name.set("Monkey Inspector")
         description.set(project.description)
         inceptionYear.set("2026")
-        url.set("https://github.com/yuhan3958/monkey-inspector")
+        url.set("https://github.com/monkeyinspector/monkey-inspector")
 
         licenses {
             license {
@@ -69,9 +69,9 @@ mavenPublishing {
         }
 
         scm {
-            connection.set("scm:git:https://github.com/yuhan3958/monkey-inspector.git")
-            developerConnection.set("scm:git:ssh://git@github.com/yuhan3958/monkey-inspector.git")
-            url.set("https://github.com/yuhan3958/monkey-inspector")
+            connection.set("scm:git:https://github.com/monkeyinspector/monkey-inspector.git")
+            developerConnection.set("scm:git:ssh://git@github.com/monkeyinspector/monkey-inspector.git")
+            url.set("https://github.com/monkeyinspector/monkey-inspector")
         }
     }
 
