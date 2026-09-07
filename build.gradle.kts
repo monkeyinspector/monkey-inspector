@@ -10,7 +10,7 @@ plugins {
 }
 
 group = "io.github.monkeyinspector"
-version = "0.3.0"
+version = "0.4.0"
 description = "A lightweight runtime inspector for jMonkeyEngine applications"
 
 repositories {
@@ -43,7 +43,7 @@ mavenPublishing {
     coordinates(
         groupId = "io.github.monkeyinspector",
         artifactId = "monkeyinspector",
-        version = "0.3.0"
+        version = "0.4.1"
     )
 
     pom {

@@ -210,6 +210,7 @@ final class SnapshotBuilder {
 
         j.name("id")
                 .value(id(spatial));
+        j.name("editableId").value((String)spatial.getUserData(io.github.monkeyinspector.edit.EditableRegistry.USER_DATA_KEY));
 
         j.name("name")
                 .value(

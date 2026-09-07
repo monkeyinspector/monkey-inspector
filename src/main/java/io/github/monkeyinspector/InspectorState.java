@@ -1,6 +1,13 @@
 package io.github.monkeyinspector;
 
 import com.jme3.app.Application;
+import com.jme3.app.SimpleApplication;
+import com.jme3.scene.Spatial;
+import io.github.monkeyinspector.edit.*;
+import io.github.monkeyinspector.viewport.*;
+import io.github.monkeyinspector.web.EditorApi;
+import java.nio.file.Path;
+import java.util.*;
 import com.jme3.app.state.BaseAppState;
 import com.jme3.profile.AppProfiler;
 
@@ -19,7 +26,7 @@ public final class InspectorState
 
     /** Current Monkey Inspector release. */
     public static final String VERSION =
-            "0.3.0";
+            "0.4.1";
 
     /** Default HTTP port. */
     public static final int DEFAULT_PORT =
@@ -39,6 +46,52 @@ public final class InspectorState
             new CopyOnWriteArrayList<>();
 
     private Application application;
+
+    private final EditableRegistry editables = new EditableRegistry();
+    private Path sourceRoot = Path.of(System.getProperty("user.dir"));
+    private ViewportConfig viewportConfig = ViewportConfig.defaults();
+    private EditCore editCore;
+    private EditorApi editorApi;
+    private ViewportCaptureProcessor capture;
+
+    /** Configure before attachment. A null root disables source editing. */
+    public InspectorState sourceRoot(Path root) {
+        if (application != null) throw new IllegalStateException("Configure source root before attachment");
+        sourceRoot = root; return this;
+    }
+
+    /** Configure capture before attachment. */
+    public InspectorState viewport(ViewportConfig value) {
+        if (application != null) throw new IllegalStateException("Configure viewport before attachment");
+        viewportConfig = Objects.requireNonNull(value); return this;
+    }
+
+    /** Register on the application thread, including before this state is attached. */
+    public InspectorState editable(String id, Spatial spatial) {
+        if (application == null) editables.register(id, spatial);
+        else application.enqueue(() -> { editables.register(id, spatial); forceSnapshot = true; });
+        return this;
+    }
+
+    private void publishEditorSnapshot() {
+        if (editorApi == null) return;
+        List<Map<String,Object>> objects = new ArrayList<>();
+        for (var handle : editables.handles()) {
+            Spatial spatial = handle.spatial();
+            var t = spatial.getLocalTranslation(); var s = spatial.getLocalScale(); var r = spatial.getLocalRotation();
+            Map<String,Object> item = new LinkedHashMap<>();
+            item.put("id", handle.id());
+            item.put("sceneId", spatial.getClass().getName() + "@" + Integer.toHexString(System.identityHashCode(spatial)));
+            item.put("className", spatial.getClass().getName());
+            item.put("values", Map.of("localTranslation", List.of(t.x,t.y,t.z), "localScale", List.of(s.x,s.y,s.z),
+                    "localRotation", List.of(r.getX(),r.getY(),r.getZ(),r.getW())));
+            var screen = application.getCamera().getScreenCoordinates(spatial.getWorldTranslation());
+            item.put("screen", List.of(screen.x / application.getCamera().getWidth(),
+                    1 - screen.y / application.getCamera().getHeight(), screen.z));
+            objects.add(Collections.unmodifiableMap(item));
+        }
+        editorApi.publish(objects);
+    }
 
     private InspectorHttpServer server;
 
@@ -261,6 +314,19 @@ public final class InspectorState
         );
 
         try {
+            var runtime = new JmeRuntimeEditor(app, editables);
+            editCore = new EditCore(sourceRoot, runtime);
+            ViewportEditor viewport = null;
+            FrameHub frames = null;
+            if (app instanceof SimpleApplication simple && viewportConfig.enabled()) {
+                frames = new FrameHub();
+                var picking = new PickingService(app.getCamera(), simple.getRootNode(), editables);
+                viewport = new ViewportEditor(runtime, picking, new DragController(app.getCamera(), picking, editables));
+                capture = new ViewportCaptureProcessor(viewportConfig, frames);
+                app.getViewPort().addProcessor(capture);
+            }
+            editorApi = new EditorApi(editCore, viewport, frames);
+            publishEditorSnapshot();
             server =
                     new InspectorHttpServer(
                             config.host(),
@@ -304,6 +370,7 @@ public final class InspectorState
                             }
                     );
 
+            server.installEditor(editorApi);
             server.start();
 
             System.out.println(
@@ -314,6 +381,9 @@ public final class InspectorState
             );
 
         } catch (IOException exception) {
+            if (server != null) server.close();
+            if (capture != null) app.getViewPort().removeProcessor(capture);
+            if (editCore != null) editCore.close();
             restoreProfiler(app);
 
             throw new IllegalStateException(
@@ -344,6 +414,7 @@ public final class InspectorState
         snapshot.set(
                 snapshotBuilder.build()
         );
+        publishEditorSnapshot();
     }
 
     @Override
@@ -352,6 +423,10 @@ public final class InspectorState
     ) {
         if (server != null)
             server.close();
+
+        if (capture != null) { app.getViewPort().removeProcessor(capture); capture.cleanup(); }
+        if (editCore != null) editCore.close();
+        capture = null; editCore = null; editorApi = null;
 
         restoreProfiler(app);
 

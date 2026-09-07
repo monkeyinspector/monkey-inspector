@@ -2,6 +2,8 @@ package io.github.monkeyinspector;
 
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
+import com.sun.net.httpserver.Filter;
+import io.github.monkeyinspector.web.EditorApi;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -29,6 +31,8 @@ final class InspectorHttpServer
     private final Commands commands;
 
     private final byte[] indexHtml;
+    private final String host;
+    private final int port;
 
     InspectorHttpServer(
             String host,
@@ -39,6 +43,8 @@ final class InspectorHttpServer
 
         this.snapshot = snapshot;
         this.commands = commands;
+        this.host = host;
+        this.port = port;
 
         this.indexHtml =
                 loadResource(
@@ -92,7 +98,7 @@ final class InspectorHttpServer
         );
 
         executor =
-                Executors.newCachedThreadPool(
+                Executors.newFixedThreadPool(12,
                         runnable -> {
                             Thread thread =
                                     new Thread(
@@ -110,12 +116,54 @@ final class InspectorHttpServer
     }
 
     void start() {
+        if (!java.net.InetAddress.getLoopbackAddress().getHostAddress().equals(host)
+                && !host.equals("127.0.0.1") && !host.equals("::1") && !host.equals("localhost"))
+            System.err.println("[MonkeyInspector] WARNING: remote bind enables source editing without authentication: " + host);
         server.start();
+    }
+
+    void installEditor(EditorApi api) {
+        api.install(server);
+        // HttpServer has no context enumeration. Apply the same guard to every known context.
+        for (String path : java.util.List.of("/", "/api/snapshot", "/api/trace/clear", "/api/engine-profile/clear",
+                "/api/snapshot/refresh", "/api/editor", "/api/source", "/api/edit", "/api/undo", "/api/redo", "/api/viewport")) {
+            // Context-specific handlers also validate methods. A root filter cannot protect child contexts.
+            server.removeContext(path);
+            com.sun.net.httpserver.HttpHandler handler = switch (path) {
+                case "/" -> this::handleIndex;
+                case "/api/snapshot" -> this::handleSnapshot;
+                case "/api/trace/clear" -> e -> handleCommand(e, commands::clearTrace);
+                case "/api/engine-profile/clear" -> e -> handleCommand(e, commands::clearEngineProfile);
+                case "/api/snapshot/refresh" -> e -> handleCommand(e, commands::refreshSnapshot);
+                default -> api::handle;
+            };
+            server.createContext(path, handler).getFilters().add(new Filter() {
+                @Override public String description() { return "Same-origin and Host protection"; }
+                @Override public void doFilter(HttpExchange exchange, Chain chain) throws IOException {
+                    String authority = exchange.getRequestHeaders().getFirst("Host");
+                    String configured = (host.contains(":") ? "[" + host + "]" : host) + ":" + port;
+                    boolean local = host.equals("127.0.0.1") || host.equals("::1") || host.equals("localhost");
+                    if (authority == null || !(authority.equalsIgnoreCase(configured) || local && authority.equalsIgnoreCase("localhost:" + port))) {
+                        EditorApi.send(exchange, 403, java.util.Map.of("message", "Invalid Host")); return;
+                    }
+                    String origin = exchange.getRequestHeaders().getFirst("Origin");
+                    String site = exchange.getRequestHeaders().getFirst("Sec-Fetch-Site");
+                    if (origin != null && !origin.equalsIgnoreCase("http://" + authority) || "cross-site".equals(site)) {
+                        EditorApi.send(exchange, 403, java.util.Map.of("message", "Cross-origin request rejected")); return;
+                    }
+                    chain.doFilter(exchange);
+                }
+            });
+        }
     }
 
     private void handleIndex(
             HttpExchange exchange
     ) throws IOException {
+
+        if ("/editor.js".equals(exchange.getRequestURI().getPath()) && "GET".equals(exchange.getRequestMethod())) {
+            send(exchange, 200, "text/javascript; charset=utf-8", loadResource("/inspector/editor.js")); return;
+        }
 
         if (
                 !"GET".equalsIgnoreCase(
@@ -270,7 +318,7 @@ final class InspectorHttpServer
                         "Content-Security-Policy",
                         "default-src 'none'; "
                                 + "style-src 'unsafe-inline'; "
-                                + "script-src 'unsafe-inline'; "
+                                + "script-src 'self' 'unsafe-inline'; "
                                 + "connect-src 'self'; "
                                 + "img-src 'self' data:"
                 );

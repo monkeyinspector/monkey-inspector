@@ -5,7 +5,7 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width,initial-scale=1">
-    <title>Monkey Inspector 0.3.0</title>
+    <title>Monkey Inspector 0.4.1</title>
 
     <style>
         :root{
@@ -344,13 +344,37 @@
             font-size:11px;
             opacity:.65
         }
+        main{grid-template-columns:24% 46% 30%;grid-template-rows:58% 42%}
+        #treePanel{grid-row:1;grid-column:1}
+        #viewportPanel{grid-row:1;grid-column:2;display:flex;flex-direction:column}
+        #propertiesPanel{grid-row:1;grid-column:3}
+        #graphsPanel{grid-row:2;grid-column:1 / -1;border-top:1px solid #343c49}
+        .game-view{position:relative;flex:1;min-height:0;background:#080a0d;overflow:hidden}
+        .game-view img{position:absolute;width:100%;height:100%;object-fit:contain}
+        .editor-overlay{position:absolute;touch-action:none}
+        .transform-row{display:flex;gap:5px;margin:8px 0;align-items:center}
+        .transform-row input{width:100%;min-width:0;background:#101319;color:inherit;border:1px solid #343c49;padding:5px}
+        .transform-row label{min-width:0;flex:1;font-size:11px}
+        #editMessage{padding:8px 12px;white-space:pre-wrap;font-size:12px;color:#a6d8ff}
+        #sourceCode{white-space:pre-wrap;tab-size:4;padding:12px;margin:0}
+        select{background:#242b35;color:inherit;padding:5px;border:1px solid #3a4351;border-radius:5px;max-width:100%}
+        button:disabled{opacity:.4;cursor:default}
+        button.tool-active{border-color:#68b9ff;color:#a6d8ff}
+        header{gap:6px} header input{width:160px}
+        @media(max-width:1000px){header{height:auto;min-height:48px;flex-wrap:wrap}main{height:calc(100vh - 80px);grid-template-columns:24% 42% 34%}header input{width:110px}}
     </style>
 </head>
 
 <body>
 
 <header>
-    <strong>🐒 Monkey Inspector <span class="small">0.3.0</span></strong>
+    <strong>🐒 Monkey Inspector <span class="small">0.4.1</span></strong>
+    <span id="connectionMode">Connecting</span>
+    <select id="editMode" aria-label="Edit mode"><option>BOTH</option><option>LIVE</option><option>SOURCE</option></select>
+    <button id="toolSelect" title="Q — Select">Q</button><button id="toolMove" title="W — Move">W</button>
+    <button disabled title="Rotate tool planned; quaternion editing available in Properties">E</button>
+    <button disabled title="Scale tool planned; numeric editing available in Properties">R</button>
+    <button id="undoEdit">Undo</button><button id="redoEdit">Redo</button>
     <input id="search" placeholder="Search scene / class / object…">
     <button id="refresh">Refresh</button>
     <span id="status">connecting…</span>
@@ -358,7 +382,9 @@
 
 <main>
 
-    <section class="panel">
+    <section class="panel" id="treePanel">
+        <h2>Editable / Source Bindings</h2>
+        <div class="section"><select id="editableSelect" aria-label="Editable object"><option value="">Select editable</option></select></div>
         <h2>Scene Graph</h2>
         <div id="scene" class="section"></div>
 
@@ -366,7 +392,15 @@
         <div id="states" class="section"></div>
     </section>
 
-    <section class="panel">
+    <section class="panel" id="viewportPanel">
+        <h2>Game Viewport <span class="small" id="viewportHint">Select · Q / Move · W</span></h2>
+        <div class="game-view"><img id="gameFrame" alt="Live game viewport"><canvas id="editorOverlay" class="editor-overlay"></canvas></div>
+        <div id="editMessage" role="status" aria-live="polite">Select an editable object.</div>
+    </section>
+
+    <section class="panel" id="propertiesPanel">
+        <h2>Transform</h2>
+        <div id="transformEditor" class="section"></div>
         <h2>Selection / Live Properties</h2>
         <div id="details" class="section">
             <div class="empty">Select an object.</div>
@@ -376,7 +410,7 @@
         <div id="watched" class="section"></div>
     </section>
 
-    <section class="panel">
+    <section class="panel" id="graphsPanel">
 
         <div class="tabs">
             <button data-tab="architecture" class="active">
@@ -390,8 +424,10 @@
             <button data-tab="engine">
                 Engine
             </button>
+            <button data-tab="source">Source</button>
         </div>
 
+        <div id="source" class="tab"><pre id="sourceCode">Select a source binding.</pre></div>
         <div id="architecture" class="tab active">
             <div class="graphFrame">
                 <div class="graphToolbar" aria-label="Architecture graph zoom">
@@ -548,6 +584,7 @@
 
         div.onclick = () => {
             selectedId = object.id
+            window.selectEditableForScene?.(object)
 
             document
                 .querySelectorAll(".row")
@@ -2033,5 +2070,6 @@
     tick()
 </script>
 
+<script src="/editor.js"></script>
 </body>
 </html>
