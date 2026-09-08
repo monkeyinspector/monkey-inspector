@@ -43,7 +43,7 @@ mavenPublishing {
     coordinates(
         groupId = "io.github.monkeyinspector",
         artifactId = "monkeyinspector",
-        version = "0.4.1"
+        version = "0.4.0"
     )
 
     pom {
